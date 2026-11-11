@@ -49,10 +49,9 @@ def plot_measurements(output_path, time, centroid_um, area_um2,
                                  label="颗粒边缘")
                 image_ax.legend(loc="upper right", frameon=False)
             image_ax.set(title="首帧颗粒轮廓", xlabel="像素 x", ylabel="像素 y")
-        if centroid_um.ndim == 2 and centroid_um.shape[1] == 2:
-            centroid_ax.plot(time, centroid_um[:, 0], label="X", lw=.9)
-            centroid_ax.plot(time, centroid_um[:, 1], label="Y", lw=.9)
-            centroid_ax.legend(frameon=False)
+        centroid_ax.plot(time, centroid_um[:, 0], label="X", lw=.9)
+        centroid_ax.plot(time, centroid_um[:, 1], label="Y", lw=.9)
+        centroid_ax.legend(frameon=False)
         centroid_ax.set(title="质心随时间", xlabel="相对触发时间（s）", ylabel="质心（µm）")
         area_ax.plot(time, area_um2, color="#28786d", lw=.9)
         area_ax.set(title="颗粒投影面积随时间", xlabel="相对触发时间（s）",
@@ -77,18 +76,17 @@ def plot_spectrum(output_path, frequency, amplitude_um, peak_hz=None):
         resolution = frequency[1] - frequency[0] if len(frequency) > 1 else np.nan
         low_limit = min(frequency[-1], max(100., 2 * (peak_hz or 0.)))
         low = frequency <= low_limit
-        if amplitude_um.ndim == 2 and amplitude_um.shape == (len(frequency), 2):
-            resultant = np.hypot(amplitude_um[:, 0], amplitude_um[:, 1])
-            axes[0].plot(frequency[low], amplitude_um[low, 0], color="#486785", lw=1,
-                         label="X 分量")
-            axes[0].plot(frequency[low], amplitude_um[low, 1], color="#28786d", lw=1,
-                         label="Y 分量")
-            axes[0].plot(frequency[low], resultant[low], color="#ae3241", lw=1.5,
-                         label="二维合幅 √(X²+Y²)")
+        resultant = np.hypot(amplitude_um[:, 0], amplitude_um[:, 1])
+        axes[0].plot(frequency[low], amplitude_um[low, 0], color="#486785", lw=1,
+                     label="X 分量")
+        axes[0].plot(frequency[low], amplitude_um[low, 1], color="#28786d", lw=1,
+                     label="Y 分量")
+        axes[0].plot(frequency[low], resultant[low], color="#ae3241", lw=1.5,
+                     label="二维合幅 √(X²+Y²)")
         axes[0].set(title="颗粒位移低频频谱", xlabel="频率（Hz）", ylabel="位移幅度（µm）")
         axes[0].grid(axis="y", alpha=.2)
         positive = frequency > 0
-        if amplitude_um.ndim == 2 and amplitude_um.shape == (len(frequency), 2) and positive.any():
+        if positive.any():
             for axis, label, line in ((0, "X 分量", "-"), (1, "Y 分量", "--")):
                 valid = positive & (amplitude_um[:, axis] > 0)
                 axes[1].semilogx(frequency[valid], amplitude_um[valid, axis],
@@ -129,7 +127,7 @@ def plot_vibration(output_path, time, displacement_um, rms_um, event_time=None,
     display_rms = rms_um[display]
     with plt.rc_context(_style()):
         fig, axes = plt.subplots(2, 1, figsize=(10, 6), sharex=True, layout="constrained")
-        if len(display_time) and display_displacement.ndim == 2 and display_displacement.shape[1] == 2:
+        if len(display_time):
             axes[0].plot(display_time, display_displacement[:, 0], lw=.9, label="X")
             axes[0].plot(display_time, display_displacement[:, 1], lw=.9, label="Y")
             axes[0].legend(frameon=False)
@@ -202,13 +200,7 @@ def plot_flow(output_path, time, flow, fit, trigger, event_time=None,
                         textcoords="offset points", color="#952436",
                         arrowprops={"arrowstyle": "-", "color": "#ae3241"},
                         bbox={"facecolor": "white", "alpha": .8, "edgecolor": "none"})
-        if hasattr(trigger, "strftime"):
-            trigger_text = trigger.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-        else:
-            trigger_text = str(trigger)
-            if "." in trigger_text:
-                dot = trigger_text.rfind(".")
-                trigger_text = trigger_text[:dot + 4]
+        trigger_text = trigger.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
         gas_text = "未计算" if gas_speed is None else f"{gas_speed:.4f} m/s"
         info = (f"触发时刻 {trigger_text}\n"
                 f"触发流量 {trigger_flow:.2f} SLM\n"
@@ -219,4 +211,82 @@ def plot_flow(output_path, time, flow, fit, trigger, event_time=None,
         ax.set(xlabel="相对触发时间（s）", ylabel="流量（SLM）",
                title="MFC 流量随时间变化")
         ax.legend(frameon=True, framealpha=.85, loc="lower right")
+        _save(fig, output_path)
+
+
+def plot_ringdown(output_path, time_s, position_um, fitted_um, baseline_um,
+                  envelope_um, fit_results, title):
+    """Save per-axis ringdown positions, envelopes, fits, and residuals."""
+    time_ms = np.asarray(time_s, dtype=float) * 1000
+    position_um = np.asarray(position_um, dtype=float)
+    fitted_um = np.asarray(fitted_um, dtype=float)
+    baseline_um = np.asarray(baseline_um, dtype=float)
+    envelope_um = np.asarray(envelope_um, dtype=float)
+    with plt.rc_context(_style()):
+        fig, axes = plt.subplots(3, 2, figsize=(11, 8), sharex=True,
+                                 layout="constrained")
+        labels = ("X", "Y")
+        for axis, label in enumerate(labels):
+            raw = position_um[:, axis] - position_um[0, axis]
+            fitted = fitted_um[:, axis] - position_um[0, axis]
+            residual = position_um[:, axis] - fitted_um[:, axis]
+            centered = position_um[:, axis] - baseline_um[:, axis]
+            axes[0, axis].plot(time_ms, raw, color="#486785", lw=1,
+                               label="原始位置")
+            axes[0, axis].plot(time_ms, fitted, color="#ae3241", lw=1.2,
+                               label="拟合")
+            result = fit_results[axis]
+            axes[0, axis].set_title(
+                f"{label}: fd={result['frequency_hz']:.3g} Hz, "
+                f"τ={result['tau_s'] * 1000:.3g} ms, R²={result['r2']:.3f}")
+            axes[0, axis].legend(frameon=False, fontsize=8)
+            axes[1, axis].plot(time_ms, centered, color="#486785", lw=1,
+                               label="位置−基线")
+            axes[1, axis].plot(time_ms, envelope_um[:, axis], "--",
+                               color="#d17a24", lw=.9, label="+包络")
+            axes[1, axis].plot(time_ms, -envelope_um[:, axis], "--",
+                               color="#d17a24", lw=.9, label="−包络")
+            axes[1, axis].legend(frameon=False, fontsize=8)
+            axes[2, axis].plot(time_ms, residual, color="#28786d", lw=1)
+            axes[2, axis].axhline(0, color=".5", lw=.6)
+            axes[2, axis].set_xlabel("片段内时间（ms）")
+            axes[0, axis].set_ylabel("位移（µm）")
+            axes[1, axis].set_ylabel("位移（µm）")
+            axes[2, axis].set_ylabel("残差（µm）")
+        fig.suptitle(title)
+        _save(fig, output_path)
+
+
+def plot_ringdown_wavelet(output_path, time_s, frequency_hz, power,
+                          edge_time_s, fit_results, title):
+    """Save X/Y wavelet power maps with fitted frequencies and edge regions."""
+    time_s = np.asarray(time_s, dtype=float)
+    frequency_hz = np.asarray(frequency_hz, dtype=float)
+    power = np.asarray(power, dtype=float)
+    edge_time_s = np.asarray(edge_time_s, dtype=float)
+    time_ms = time_s * 1000
+    vmax = float(np.nanmax(power))
+    with plt.rc_context(_style()):
+        fig, axes = plt.subplots(2, 1, figsize=(10, 7), sharex=True,
+                                 layout="constrained")
+        mesh = None
+        edge_mask = ((time_s[None, :] < edge_time_s[:, None]) |
+                     ((time_s[-1] - time_s)[None, :] < edge_time_s[:, None]))
+        for axis, label in enumerate(("X", "Y")):
+            mesh = axes[axis].pcolormesh(
+                time_ms, frequency_hz, power[axis], shading="auto",
+                vmin=0, vmax=vmax, cmap="viridis")
+            axes[axis].set_yscale("log")
+            result = fit_results[axis]
+            axes[axis].axhline(result["frequency_hz"], color="#ae3241",
+                               ls="--", lw=1,
+                               label=f"拟合 fd={result['frequency_hz']:.3g} Hz")
+            axes[axis].contourf(time_ms, frequency_hz, edge_mask.astype(float),
+                                levels=[.5, 1.5], colors="#808080", alpha=.18,
+                                hatches=["///"])
+            axes[axis].set_ylabel(f"{label} 频率（Hz，对数轴）")
+            axes[axis].legend(frameon=False, loc="upper right")
+        axes[-1].set_xlabel("片段内时间（ms）")
+        fig.colorbar(mesh, ax=axes, label="尺度归一化小波功率（相对强度）")
+        fig.suptitle(f"{title}\n斜线区域：片段边缘影响参考区")
         _save(fig, output_path)

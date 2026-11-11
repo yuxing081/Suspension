@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 from openpyxl import Workbook
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.styles import Font
 from scipy import ndimage as ndi
 from scipy import signal
 
@@ -17,20 +17,27 @@ from particle_plots import plot_fast_motion, plot_flow, plot_spectrum, plot_vibr
 
 def motion_metrics(position_um, fps, velocity_window_s=.002, vibration_window_s=.020):
     """Return local velocity and detrended two-dimensional vibration RMS."""
+    # 初始化结果数组
     velocity = np.full_like(position_um, np.nan)
     rms = np.full(len(position_um), np.nan)
+    
+    
     valid = np.isfinite(position_um).all(axis=1)
-    for values in ndi.find_objects(ndi.label(valid)[0]):
+    for values in ndi.find_objects(ndi.label(valid)[0]):     # 将轨迹划分成若干连续有效的片段
         section = values[0]
         pos = position_um[section] - np.mean(position_um[section], axis=0)
         for duration, output in ((velocity_window_s, velocity[section]),
                                  (vibration_window_s, rms[section])):
-            half = max(1, round(fps * duration / 2))
-            if len(pos) < 2 * half + 1:
+            half = max(1, round(fps * duration / 2))         # 计算窗口大小
+            if len(pos) < 2 * half + 1:                      # 如果连续有效数据不够一个完整窗口就不进行计算
                 continue
-            dt = np.arange(-half, half + 1) / fps
-            mean = ndi.uniform_filter1d(pos, len(dt), axis=0)
-            slope = ndi.correlate1d(pos, dt / (dt @ dt), axis=0)
+            dt = np.arange(-half, half + 1) / fps            # 当前帧对应窗口范围
+            
+            # 以下两个函数内部已经实现了滑动窗口的计算
+            mean = ndi.uniform_filter1d(pos, len(dt), axis=0)           # 计算局部平均位置
+            slope = ndi.correlate1d(pos, dt / (dt @ dt), axis=0)        # 计算局部速度--最小二乘拟合斜率
+            
+        
             if output.ndim == 2:
                 output[half:-half] = slope[half:-half] / 1000
             else:
@@ -108,32 +115,20 @@ def fit_ramp(sample_time, setpoint, flow_slm):
 
 
 def write_summary(path, row):
-    """Write the original eight-column particle summary workbook."""
+    """Export eight scientific summary fields without presentation-only styling."""
     headers = ["颗粒文件名", "序号", "平均投影面积 (µm²)", "面积等效直径 (µm)",
                "振动频谱主峰 (Hz)", "触发截面平均流速 (m/s)",
                "流量上升斜率 (SLM/s)", "快速段平均移动速度 (mm/s)"]
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "颗粒结果"
-    sheet.sheet_view.showGridLines = False
     sheet.append(headers)
     sheet.append(row[:len(headers)])
-    edge = Side(style="thin", color="D9E2F3")
-    for cells in sheet:
-        for cell in cells:
-            cell.font = Font(name="Microsoft YaHei", size=10)
-            cell.alignment = Alignment(vertical="center")
-            cell.border = Border(left=edge, right=edge, top=edge, bottom=edge)
-    for cell in sheet[1]:
-        cell.font = Font(name="Microsoft YaHei", size=11, bold=True, color="FFFFFF")
-        cell.fill = PatternFill(fill_type="solid", fgColor="1F4E78")
-        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    for cell in sheet[2][2:]:
-        cell.number_format = "0.000"
-    for column, width in zip("ABCDEFGH", [28, 10, 18, 18, 18, 18, 18, 18]):
-        sheet.column_dimensions[column].width = width
-    sheet.row_dimensions[1].height = 34
     sheet.freeze_panes = "A2"
+    for cell in sheet[1]:
+        cell.font = Font(bold=True)
+    sheet.column_dimensions["A"].width = 28
+    sheet.column_dimensions["B"].width = 12
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     workbook.save(path)
@@ -142,8 +137,6 @@ def write_summary(path, row):
 def _float_value(row, key):
     value = row[key]
     return np.nan if value == "" else float(value)
-
-
 
 
 def _format_number(value, decimal_places=6):
@@ -161,8 +154,6 @@ def _load_frame_arrays(rows):
     area_um2 = np.array([_float_value(row, "projected_area_um2") for row in rows])
     valid = np.array([int(row["tracking_valid"]) == 1 for row in rows])
     return source_frames, time, centroid_px, area_px, centroid_um, area_um2, valid
-
-
 
 def _write_frames_csv(path, rows, source_frames, time, centroid_px, area_px,
                       centroid_um, area_um2, displacement, velocity, speed, rms,
@@ -192,6 +183,8 @@ def postprocess_measurements(measurement_dir, output_dir, event_label="快速移
                              channel_height_mm=12., velocity_window_s=.002,
                              vibration_window_s=.020):
     """Generate analysis products from exported measurements without raw inputs."""
+    
+    # 创建文件夹
     measurement_dir = Path(measurement_dir)
     output_dir = Path(output_dir)
     if output_dir.resolve().is_relative_to(measurement_dir.resolve()):
@@ -200,6 +193,8 @@ def postprocess_measurements(measurement_dir, output_dir, event_label="快速移
             or min(velocity_window_s, vibration_window_s) <= 0):
         raise ValueError("速度和振动窗口必须为正数秒。")
     output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # 数据读入
     info, rows = load_measurements(measurement_dir)
     sample_time, setpoint, raw_samples = load_flow_samples(measurement_dir)
     if not rows:
@@ -209,10 +204,15 @@ def postprocess_measurements(measurement_dir, output_dir, event_label="快速移
     source_frames, time, centroid_px, area_px, centroid_um, area_um2, valid = _load_frame_arrays(rows)
     if not np.isfinite(centroid_um[0]).all():
         raise ValueError("测量首帧没有有效颗粒质心。")
+    
+    # 位移、面积、直径随时间变化计算
     displacement = centroid_um - centroid_um[0]
     velocity, rms = motion_metrics(displacement, fps, velocity_window_s, vibration_window_s)
     speed = np.linalg.norm(velocity, axis=1)
-    diameter = 2 * np.sqrt(np.nanmean(area_um2) / np.pi)
+    mean_area = float(np.nanmean(area_um2))
+    diameter = 2 * np.sqrt(mean_area / np.pi)
+    
+    # 关键帧前后特别计算
     if event_frame is None:
         event_index = departure_index(displacement, velocity, 2 * float(info["initial_radius_px"]) * scale, fps)
     else:
@@ -225,8 +225,12 @@ def postprocess_measurements(measurement_dir, output_dir, event_label="快速移
         mask_start = max(0, event_index - max(1, round(vibration_window_s * fps / 2)))
         rms[mask_start:] = np.nan
 
-    fast = valid & (np.arange(len(source_frames)) >= (len(source_frames) if event_index is None else event_index))
+
+    # 快速移动段计算
+    fast = valid & (np.arange(len(source_frames)) >= (event_index if event_index is not None else len(source_frames)))
     fast_rows = np.column_stack((source_frames[fast], time[fast], centroid_um[fast], velocity[fast], speed[fast]))
+    
+    # 数据写入、、画图
     write_numeric_csv(output_dir / "fast_motion.csv",
                       ["source_frame", "time_from_trigger_s", "centroid_x_um", "centroid_y_um",
                        "vx_mm_s", "vy_mm_s", "speed_mm_s"], fast_rows)
@@ -257,7 +261,6 @@ def postprocess_measurements(measurement_dir, output_dir, event_label="快速移
                       centroid_px, area_px, centroid_um, area_um2, displacement,
                       velocity, speed, rms, raw_frame, flow_frame, event_index, event_label)
 
-    mean_area = float(np.nanmean(area_um2))
     mean_speed_values = speed[fast & np.isfinite(speed)]
     mean_speed = float(mean_speed_values.mean()) if len(mean_speed_values) else None
     write_summary(output_dir / "particle_summary.xlsx", [

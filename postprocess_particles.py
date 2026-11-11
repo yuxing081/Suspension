@@ -1,7 +1,5 @@
 from pathlib import Path
-
 from particle_postprocess import postprocess_measurements
-
 
 workspace = Path(__file__).resolve().parents[1]
 experiment_dir = workspace / "261110"
@@ -15,7 +13,7 @@ channel_width_mm, channel_height_mm = 27., 12.
 velocity_window_s = .002
 vibration_window_s = .020
 
-
+# 读取测量 → 计算位移、速度和振动 RMS → 判断快速移动起点 → 分别计算移动前频谱、移动后速度 → 流量换算及结果汇总
 if __name__ == "__main__":
     postprocess_measurements(
         measurement_dir=measurement_dir,
