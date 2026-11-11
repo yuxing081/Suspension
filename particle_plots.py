@@ -24,44 +24,39 @@ def _save(fig, output_path):
     plt.close(fig)
 
 
-def plot_centroids(output_path, time, centroid_um, area_um2, event_time=None,
-                   first_gray=None, outline_xy=None):
-    """Save centroid/area traces and a first-frame particle contour check."""
+
+
+def plot_measurements(output_path, time, centroid_um, area_um2,
+                      first_gray=None, outline_xy=None):
+    """Save the basic first-frame, centroid and projected-area measurements."""
     time = np.asarray(time)
     centroid_um = np.asarray(centroid_um)
     area_um2 = np.asarray(area_um2)
     with plt.rc_context(_style()):
-        fig, axes = plt.subplots(2, 2, figsize=(11, 7), layout="constrained")
-        if first_gray is not None:
-            axes[0, 0].imshow(first_gray, cmap="gray")
-            if outline_xy is not None:
-                outline_xy = np.asarray(outline_xy)
-                axes[0, 0].scatter(outline_xy[:, 0], outline_xy[:, 1],
-                                   s=2, facecolors="none", edgecolors="#e45756",
-                                   label="颗粒边缘")
-            axes[0, 0].set(title="首帧颗粒边缘", xlabel="像素 x", ylabel="像素 y")
-            if outline_xy is not None:
-                axes[0, 0].legend(loc="upper right", frameon=False)
+        fig = plt.figure(figsize=(11, 7), layout="constrained")
+        grid = fig.add_gridspec(2, 2)
+        image_ax = fig.add_subplot(grid[0, 0])
+        centroid_ax = fig.add_subplot(grid[0, 1])
+        area_ax = fig.add_subplot(grid[1, :])
+        if first_gray is None:
+            image_ax.axis("off")
         else:
-            axes[0, 0].axis("off")
-        axes[0, 1].plot(time, centroid_um[:, 0], label="X", lw=.9)
-        axes[0, 1].plot(time, centroid_um[:, 1], label="Y", lw=.9)
-        axes[0, 1].set(title="质心随时间", xlabel="相对触发时间（s）", ylabel="质心（µm）")
-        axes[0, 1].legend(frameon=False)
-        axes[1, 0].plot(time, area_um2, color="#28786d", lw=.9)
-        axes[1, 0].set(title="颗粒面积随时间", xlabel="相对触发时间（s）", ylabel="面积（µm²）")
-        before = np.isfinite(centroid_um).all(axis=1)
-        if event_time is not None:
-            before &= time < event_time
-        if np.any(before):
-            centered = centroid_um[before] - np.median(centroid_um[before], axis=0)
-            axes[1, 1].plot(time[before], centered[:, 0], lw=.8, label="X")
-            axes[1, 1].plot(time[before], centered[:, 1], lw=.8, label="Y")
-            axes[1, 1].legend(frameon=False)
-        axes[1, 1].set(title="快速移动前的质心位移", xlabel="相对触发时间（s）", ylabel="相对中位位置（µm）")
-        if event_time is not None and len(time):
-            for ax in (axes[0, 1], axes[1, 0]):
-                ax.axvline(event_time, color="#ae3241", ls="--", lw=.8)
+            image_ax.imshow(first_gray, cmap="gray")
+            if outline_xy is not None and len(outline_xy):
+                outline_xy = np.asarray(outline_xy)
+                image_ax.scatter(outline_xy[:, 0], outline_xy[:, 1], s=2,
+                                 facecolors="none", edgecolors="#e45756",
+                                 label="颗粒边缘")
+                image_ax.legend(loc="upper right", frameon=False)
+            image_ax.set(title="首帧颗粒轮廓", xlabel="像素 x", ylabel="像素 y")
+        if centroid_um.ndim == 2 and centroid_um.shape[1] == 2:
+            centroid_ax.plot(time, centroid_um[:, 0], label="X", lw=.9)
+            centroid_ax.plot(time, centroid_um[:, 1], label="Y", lw=.9)
+            centroid_ax.legend(frameon=False)
+        centroid_ax.set(title="质心随时间", xlabel="相对触发时间（s）", ylabel="质心（µm）")
+        area_ax.plot(time, area_um2, color="#28786d", lw=.9)
+        area_ax.set(title="颗粒投影面积随时间", xlabel="相对触发时间（s）",
+                    ylabel="面积（µm²）")
         _save(fig, output_path)
 
 
@@ -120,7 +115,8 @@ def plot_spectrum(output_path, frequency, amplitude_um, peak_hz=None):
         _save(fig, output_path)
 
 
-def plot_vibration(output_path, time, displacement_um, rms_um, event_time=None):
+def plot_vibration(output_path, time, displacement_um, rms_um, event_time=None,
+                   window_seconds=.020):
     """Save particle displacement and local vibration RMS before fast motion."""
     time = np.asarray(time)
     displacement_um = np.asarray(displacement_um)
@@ -145,8 +141,11 @@ def plot_vibration(output_path, time, displacement_um, rms_um, event_time=None):
                          transform=axes[1].transAxes)
         axes[0].set_ylabel("相对首帧位移（µm）")
         axes[0].set_title("快速移动前的质心位移")
-        axes[1].set(xlabel="相对触发时间（s）", ylabel="20 ms 去趋势 RMS（µm）",
-                    title="质心局部波动（20 ms 去线性趋势）")
+        window_ms = window_seconds * 1000
+        window_label = f"{window_ms:g} ms"
+        axes[1].set(xlabel="相对触发时间（s）",
+                    ylabel=f"{window_label} 去趋势 RMS（µm）",
+                    title=f"质心局部波动（{window_label} 去线性趋势）")
         if event_time is not None:
             for ax in axes:
                 ax.axvline(event_time, color="#ae3241", ls="--", lw=.8)
