@@ -1,4 +1,4 @@
-"""逐段拟合有漂移的单模态衰减振动，并计算复 Morlet 连续小波变换。"""
+"""逐段拟合衰减振动，对完整连续轨迹统一计算复 Morlet 小波变换。"""
 
 import csv
 import json
@@ -10,7 +10,7 @@ from scipy import signal
 from scipy.optimize import differential_evolution, least_squares
 
 from particle_data import load_measurements, write_numeric_csv
-from particle_plots import plot_ringdown, plot_ringdown_wavelet
+from particle_plots import plot_ringdown, plot_trajectory_wavelet
 
 
 def fit_ringdown(time_s, position_um, frequency_range_hz, tau_range_s):
@@ -94,7 +94,7 @@ def morlet_power(position_um, fps, frequency_range_hz, frequency_count):
 def analyze_vibration_segments(measurement_dir, output_dir, segments,
                                frequency_range_hz=(100., 2500.),
                                tau_range_s=(.0001, .1), wavelet_frequency_count=160):
-    """按原视频帧号闭区间逐段分析，仅写入指定的后处理目录。"""
+    """完整轨迹做一次小波变换；帧号闭区间仅控制逐段拟合和局部展示。"""
     info, rows = load_measurements(measurement_dir)
     fps = float(info["capture_fps"])
     if not 0 < frequency_range_hz[0] < frequency_range_hz[1] < fps / 2:
@@ -105,23 +105,41 @@ def analyze_vibration_segments(measurement_dir, output_dir, segments,
     position = np.array([[float(row["centroid_x_um"] or "nan"),
                           float(row["centroid_y_um"] or "nan")] for row in rows])
     valid = np.array([row["tracking_valid"] == "1" for row in rows])
+    if (not valid.all() or not np.isfinite(position).all()
+            or np.any(np.diff(video_frames) != 1)):
+        raise ValueError("完整轨迹小波要求导出帧连续且跟踪有效，不能跳过缺帧后拼接。")
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     settings = {"measurement_dir": str(Path(measurement_dir).resolve()),
                 "capture_fps": fps, "segments": segments,
                 "frequency_range_hz": frequency_range_hz, "tau_range_s": tau_range_s,
                 "wavelet": "cmor1.5-1.0", "wavelet_frequency_count": wavelet_frequency_count,
+                "wavelet_scope": "full_measurement_trajectory",
+                "wavelet_start_video_frame": int(video_frames[0]),
+                "wavelet_end_video_frame": int(video_frames[-1]),
                 "model": "q0 + b*t + A*exp(-t/tau)*cos(2*pi*f*t+phi)"}
     (output_dir / "settings.json").write_text(
         json.dumps(settings, indent=2, ensure_ascii=False), encoding="utf-8")
-    summary = []
+    # 保留稳态、激励、衰减和事件间隔，只对完整轨迹去一次线性趋势并计算 CWT。
+    full_time = (video_frames - video_frames[0]) / fps
+    frequency, power, edge_time = morlet_power(
+        position, fps, frequency_range_hz, wavelet_frequency_count)
+    edge_mask = ((full_time[None, :] < edge_time[:, None])
+                 | ((full_time[-1] - full_time)[None, :] < edge_time[:, None]))
+    power_max = float(power.max())
+    np.savez_compressed(
+        output_dir / "wavelet.npz", source_frame=frames, video_frame=video_frames,
+        time_from_trigger_s=trigger_time, time_from_start_s=full_time,
+        frequency_hz=frequency, normalized_power_x=power[0], normalized_power_y=power[1],
+        edge_time_s=edge_time, edge_mask=edge_mask, power_max=power_max)
+    summary, fit_ranges = [], []
     for number, start, end in segments:
         keep = (video_frames >= start) & (video_frames <= end)
-        if (keep.sum() < 8 or not np.array_equal(video_frames[keep], np.arange(start, end + 1))
-                or not valid[keep].all() or not np.isfinite(position[keep]).all()):
+        if keep.sum() < 8 or not np.array_equal(video_frames[keep], np.arange(start, end + 1)):
             raise ValueError(f"第 {number} 段须至少 8 帧，且在测量导出范围内连续有效。")
         time = (video_frames[keep] - start) / fps
         traces = position[keep]
+        fit_ranges.append((number, float(trigger_time[keep][0]), float(trigger_time[keep][-1])))
         results, fitted, baseline, envelope = [], [], [], []
         for axis, values in zip(("x", "y"), traces.T):
             result, curve, trend, decay = fit_ringdown(
@@ -141,18 +159,16 @@ def analyze_vibration_segments(measurement_dir, output_dir, segments,
                   f"tau={result['tau_s'] * 1000:.3f} ms, R2={result['r2']:.4f}{note}")
         fitted, baseline, envelope = np.array(fitted).T, np.array(baseline).T, np.array(envelope).T
         
-        # 小波变换
-        frequency, power, edge_time = morlet_power(
-            traces, fps, frequency_range_hz, wavelet_frequency_count)
-        
         # 数据输出
         segment_dir = output_dir / f"{number:02d}_{start}-{end}"
         segment_dir.mkdir(parents=True, exist_ok=True)
         title = f"第 {number} 次振动 · 原视频帧 {start}–{end}"
         plot_ringdown(segment_dir / "fit.png", time, traces, fitted, baseline,
                       envelope, results, title)
-        plot_ringdown_wavelet(segment_dir / "wavelet.png", time, frequency, power,
-                              edge_time, results, title)
+        # 局部图直接裁取完整小波结果，边缘标记和色标均沿用完整轨迹。
+        plot_trajectory_wavelet(
+            segment_dir / "wavelet.png", trigger_time[keep], traces, frequency,
+            power[:, :, keep], edge_mask[:, keep], fit_ranges[-1:], title, power_max)
         write_numeric_csv(
             segment_dir / "fit.csv",
             ["source_frame", "video_frame", "time_from_trigger_s", "time_from_start_s",
@@ -164,9 +180,15 @@ def analyze_vibration_segments(measurement_dir, output_dir, segments,
         )
         np.savez_compressed(segment_dir / "wavelet.npz", source_frame=frames[keep],
                             video_frame=video_frames[keep],
+                            time_from_trigger_s=trigger_time[keep],
                             time_from_start_s=time, frequency_hz=frequency,
-                            normalized_power_x=power[0], normalized_power_y=power[1],
-                            edge_time_s=edge_time)
+                            normalized_power_x=power[0][:, keep],
+                            normalized_power_y=power[1][:, keep],
+                            edge_time_s=edge_time, edge_mask=edge_mask[:, keep],
+                            power_max=power_max)
+    plot_trajectory_wavelet(
+        output_dir / "wavelet.png", trigger_time, position, frequency, power, edge_mask,
+        fit_ranges, f"完整轨迹 · 原视频帧 {video_frames[0]}–{video_frames[-1]}", power_max)
     with (output_dir / "fit_results.csv").open("w", encoding="utf-8-sig", newline="") as file:
         writer = csv.DictWriter(file, fieldnames=summary[0].keys())
         writer.writeheader()

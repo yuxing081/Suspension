@@ -1,4 +1,4 @@
-"""手动指定每次振动的原视频帧范围，分别拟合并绘制小波图。"""
+"""完整导出轨迹统一绘制小波图，手动指定帧范围分别拟合衰减振动。"""
 
 from pathlib import Path
 
@@ -8,11 +8,12 @@ workspace = Path(__file__).resolve().parents[1]
 measurement_dir = workspace / "261110" / "1" / "measurements"
 output_dir = measurement_dir.parent / "postprocess" / "ringdown"
 
-# (振动编号, 起始帧, 终止帧)：原视频 1-based 帧号，包含两端。
+# (振动编号, 起始帧, 终止帧)：原视频 1-based 帧号，包含两端；仅控制拟合和局部展示。
+# 小波始终使用 measurement_dir 中导出的完整连续轨迹，不受下面的分段范围限制。
 # 以下是现有轨迹的示例尾段；起点应放在激励结束后，终点避开再次激励。
 segments = [
-    (1, 3530, 3610),
-    (2, 3760, 3830),
+    (1, 26000, 26200),
+    (2, 43000, 43265),
 ]
 
 frequency_range_hz = (100., 2500.)  # 拟合搜索范围和小波显示范围，须低于采集帧率的一半。

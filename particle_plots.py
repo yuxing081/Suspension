@@ -257,36 +257,86 @@ def plot_ringdown(output_path, time_s, position_um, fitted_um, baseline_um,
         _save(fig, output_path)
 
 
-def plot_ringdown_wavelet(output_path, time_s, frequency_hz, power,
-                          edge_time_s, fit_results, title):
-    """Save X/Y wavelet power maps with fitted frequencies and edge regions."""
+def plot_trajectory_wavelet(output_path, time_s, position_um, frequency_hz,
+                            power, edge_mask, fit_ranges, title, power_max):
+    """Save a full-trajectory time-frequency map and mark fitted intervals."""
     time_s = np.asarray(time_s, dtype=float)
+    position_um = np.asarray(position_um, dtype=float)
     frequency_hz = np.asarray(frequency_hz, dtype=float)
     power = np.asarray(power, dtype=float)
-    edge_time_s = np.asarray(edge_time_s, dtype=float)
-    time_ms = time_s * 1000
-    vmax = float(np.nanmax(power))
+    edge_mask = np.asarray(edge_mask, dtype=bool)
+    vmax = float(power_max)
+
     with plt.rc_context(_style()):
-        fig, axes = plt.subplots(2, 1, figsize=(10, 7), sharex=True,
-                                 layout="constrained")
-        mesh = None
-        edge_mask = ((time_s[None, :] < edge_time_s[:, None]) |
-                     ((time_s[-1] - time_s)[None, :] < edge_time_s[:, None]))
-        for axis, label in enumerate(("X", "Y")):
+        fig, axes = plt.subplots(3, 1, figsize=(12, 9), sharex=True,
+                                 layout="constrained",
+                                 gridspec_kw={"height_ratios": (1, 1.35, 1.35)})
+        centered = position_um - position_um[0]
+        axes[0].plot(time_s, centered[:, 0], lw=.8, color="#486785", label="X")
+        axes[0].plot(time_s, centered[:, 1], lw=.8, color="#28786d", label="Y")
+        axes[0].set_ylabel("相对首帧位移（µm）")
+        axes[0].legend(frameon=False, ncol=2, loc="upper right")
+
+        meshes = []
+        for axis, label in enumerate(("X", "Y"), start=1):
             mesh = axes[axis].pcolormesh(
-                time_ms, frequency_hz, power[axis], shading="auto",
+                time_s, frequency_hz, power[axis - 1], shading="auto",
                 vmin=0, vmax=vmax, cmap="viridis")
+            meshes.append(mesh)
             axes[axis].set_yscale("log")
-            result = fit_results[axis]
-            axes[axis].axhline(result["frequency_hz"], color="#ae3241",
-                               ls="--", lw=1,
-                               label=f"拟合 fd={result['frequency_hz']:.3g} Hz")
-            axes[axis].contourf(time_ms, frequency_hz, edge_mask.astype(float),
+            axes[axis].set_ylabel(f"{label} 频率（Hz，对数轴）")
+            axes[axis].contourf(time_s, frequency_hz, edge_mask.astype(float),
                                 levels=[.5, 1.5], colors="#808080", alpha=.18,
                                 hatches=["///"])
-            axes[axis].set_ylabel(f"{label} 频率（Hz，对数轴）")
-            axes[axis].legend(frameon=False, loc="upper right")
-        axes[-1].set_xlabel("片段内时间（ms）")
-        fig.colorbar(mesh, ax=axes, label="尺度归一化小波功率（相对强度）")
-        fig.suptitle(f"{title}\n斜线区域：片段边缘影响参考区")
+
+        for number, start, end in fit_ranges:
+            axes[0].axvspan(start, end, color="#ae3241", alpha=.12, lw=0)
+            for axis in axes[1:]:
+                axis.axvline(start, color="white", ls="--", lw=.6, alpha=.6)
+                axis.axvline(end, color="white", ls="--", lw=.6, alpha=.6)
+            axes[0].text((start + end) / 2, .96, f"拟合段 {number}",
+                         transform=axes[0].get_xaxis_transform(), ha="center",
+                         va="top", color="#952436", fontsize=9)
+        axes[-1].set_xlabel("相对触发时间（s）")
+        fig.colorbar(meshes[0], ax=axes[1:], label="尺度归一化小波功率（相对强度）")
+        fig.suptitle(f"{title}\n斜线区域：完整轨迹边缘影响参考区")
+        _save(fig, output_path)
+
+
+def plot_vibration_candidates(output_path, time_s, position_um, rms_um,
+                              start_threshold_um, end_threshold_um,
+                              candidate_ranges, rms_window_s):
+    """Save a review plot for candidate vibration intervals selected by RMS."""
+    time_s = np.asarray(time_s, dtype=float)
+    position_um = np.asarray(position_um, dtype=float)
+    rms_um = np.asarray(rms_um, dtype=float)
+    valid = np.isfinite(position_um).all(axis=1)
+    reference = position_um[np.flatnonzero(valid)[0]]
+    centered = position_um - reference
+    window_ms = rms_window_s * 1000
+
+    with plt.rc_context(_style()):
+        fig, axes = plt.subplots(2, 1, figsize=(13, 7), sharex=True,
+                                 layout="constrained")
+        axes[0].plot(time_s, centered[:, 0], lw=.8, color="#486785", label="X")
+        axes[0].plot(time_s, centered[:, 1], lw=.8, color="#28786d", label="Y")
+        axes[0].set_ylabel("相对首个有效点位移（µm）")
+        axes[0].legend(frameon=False, ncol=2, loc="upper right")
+
+        for number, start, end in candidate_ranges:
+            axes[0].axvspan(start, end, color="#ae3241", alpha=.12, lw=0)
+            axes[0].text((start + end) / 2, .96, str(number),
+                         transform=axes[0].get_xaxis_transform(), ha="center",
+                         va="top", color="#952436", fontsize=6, rotation=90)
+
+        axes[1].plot(time_s, rms_um, color="#ae3241", lw=.9, label="局部振动 RMS")
+        axes[1].axhline(start_threshold_um, color="#d17a24", ls="--", lw=1,
+                        label=f"开始阈值 {start_threshold_um:g} µm")
+        axes[1].axhline(end_threshold_um, color="#28786d", ls=":", lw=1,
+                        label=f"结束阈值 {end_threshold_um:g} µm")
+        axes[1].set(xlabel="相对触发时间（s）",
+                    ylabel="振动 RMS（µm，对数轴）", yscale="log",
+                    title=f"候选振动区间（RMS 窗口 {window_ms:g} ms）")
+        axes[1].legend(frameon=False, loc="upper right")
+        fig.suptitle("完整轨迹的振动候选段复核")
         _save(fig, output_path)

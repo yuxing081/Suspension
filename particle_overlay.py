@@ -2,6 +2,8 @@
 
 import cv2
 import numpy as np
+from pathlib import Path
+from tqdm import tqdm
 
 
 def draw_tracking_overlay(
@@ -77,3 +79,59 @@ def draw_tracking_overlay(
         cv2.circle(output, (center_x, center_y), 2, (0, 0, 255), -1, cv2.LINE_8)
 
     return output
+
+
+def export_overlay_clips(overlay_path, output_dir, segments, first_video_frame):
+    """Export inclusive frame ranges from an already annotated video."""
+    overlay_path = Path(overlay_path)
+    output_dir = Path(output_dir)
+    first_video_frame = int(first_video_frame)
+    segments = [(number, int(start), int(end)) for number, start, end in segments]
+    if not segments:
+        return []
+    if any(start < first_video_frame or end < start for _, start, end in segments):
+        raise ValueError("视频片段帧范围无效")
+    last_video_frame = max(end for _, _, end in segments)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    cap = cv2.VideoCapture(str(overlay_path))
+    if not cap.isOpened():
+        raise RuntimeError(f"OpenCV 无法打开标注视频：{overlay_path}")
+    writers = {}
+    try:
+        playback_fps = cap.get(cv2.CAP_PROP_FPS)
+        if not np.isfinite(playback_fps) or playback_fps <= 0:
+            raise RuntimeError(f"无法读取输入视频播放帧率：{overlay_path}")
+        output_paths = [output_dir / f"{number}-{start}-{end}.mp4"
+                        for number, start, end in segments]
+        progress = tqdm(total=last_video_frame - first_video_frame + 1,
+                        desc="导出标记视频片段", unit="帧", dynamic_ncols=True)
+        try:
+            for video_frame in range(first_video_frame, last_video_frame + 1):
+                ok, frame = cap.read()
+                if not ok:
+                    raise RuntimeError(
+                        f"视频在第 {video_frame} 帧前结束或解码失败：{overlay_path}")
+                progress.update(1)
+                for index, (_, start, _) in enumerate(segments):
+                    if start == video_frame:
+                        height, width = frame.shape[:2]
+                        writer = cv2.VideoWriter(
+                            str(output_paths[index]), cv2.VideoWriter_fourcc(*"mp4v"),
+                            float(playback_fps), (width, height))
+                        if not writer.isOpened():
+                            raise RuntimeError(f"无法创建输出视频：{output_paths[index]}")
+                        writers[index] = writer
+                for index, (_, start, end) in enumerate(segments):
+                    if start <= video_frame <= end:
+                        writers[index].write(frame)
+                    if end == video_frame and index in writers:
+                        writers[index].release()
+                        del writers[index]
+        finally:
+            progress.close()
+    finally:
+        for writer in writers.values():
+            writer.release()
+        cap.release()
+    return output_paths
