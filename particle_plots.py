@@ -6,6 +6,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib import font_manager
+from matplotlib.colors import LogNorm, Normalize
 import numpy as np
 
 
@@ -258,14 +259,27 @@ def plot_ringdown(output_path, time_s, position_um, fitted_um, baseline_um,
 
 
 def plot_trajectory_wavelet(output_path, time_s, position_um, frequency_hz,
-                            power, edge_mask, fit_ranges, title, power_max):
-    """Save a full-trajectory time-frequency map and mark fitted intervals."""
+                            power, edge_mask, title, power_max):
+    """Save the time-frequency map of a continuous tracking interval."""
     time_s = np.asarray(time_s, dtype=float)
     position_um = np.asarray(position_um, dtype=float)
     frequency_hz = np.asarray(frequency_hz, dtype=float)
     power = np.asarray(power, dtype=float)
     edge_mask = np.asarray(edge_mask, dtype=bool)
     vmax = float(power_max)
+    # 强烈的离开运动会抬高全局上限，对数色标保留较弱振动的可见度。
+    power_norm = LogNorm(vmin=vmax / 1e6, vmax=vmax, clip=True) if vmax > 0 else Normalize(0, 1)
+
+    # 长轨迹仅在绘图时按时间像素取最大值，保留短暂峰值。数值文件仍为逐帧功率。
+    step = max(1, int(np.ceil(len(time_s) / 1600)))
+    if step > 1:
+        starts = np.arange(0, len(time_s), step)
+        stops = np.r_[starts[1:] - 1, len(time_s) - 1]
+        plot_time = (time_s[starts] + time_s[stops]) / 2
+        plot_power = np.maximum.reduceat(power, starts, axis=2)
+        plot_edge = np.logical_or.reduceat(edge_mask, starts, axis=1)
+    else:
+        plot_time, plot_power, plot_edge = time_s, power, edge_mask
 
     with plt.rc_context(_style()):
         fig, axes = plt.subplots(3, 1, figsize=(12, 9), sharex=True,
@@ -280,26 +294,19 @@ def plot_trajectory_wavelet(output_path, time_s, position_um, frequency_hz,
         meshes = []
         for axis, label in enumerate(("X", "Y"), start=1):
             mesh = axes[axis].pcolormesh(
-                time_s, frequency_hz, power[axis - 1], shading="auto",
-                vmin=0, vmax=vmax, cmap="viridis")
+                plot_time, frequency_hz, plot_power[axis - 1], shading="auto",
+                norm=power_norm, cmap="viridis")
             meshes.append(mesh)
             axes[axis].set_yscale("log")
             axes[axis].set_ylabel(f"{label} 频率（Hz，对数轴）")
-            axes[axis].contourf(time_s, frequency_hz, edge_mask.astype(float),
+            axes[axis].contourf(plot_time, frequency_hz, plot_edge.astype(float),
                                 levels=[.5, 1.5], colors="#808080", alpha=.18,
                                 hatches=["///"])
 
-        for number, start, end in fit_ranges:
-            axes[0].axvspan(start, end, color="#ae3241", alpha=.12, lw=0)
-            for axis in axes[1:]:
-                axis.axvline(start, color="white", ls="--", lw=.6, alpha=.6)
-                axis.axvline(end, color="white", ls="--", lw=.6, alpha=.6)
-            axes[0].text((start + end) / 2, .96, f"拟合段 {number}",
-                         transform=axes[0].get_xaxis_transform(), ha="center",
-                         va="top", color="#952436", fontsize=9)
-        axes[-1].set_xlabel("相对触发时间（s）")
-        fig.colorbar(meshes[0], ax=axes[1:], label="尺度归一化小波功率（相对强度）")
-        fig.suptitle(f"{title}\n斜线区域：完整轨迹边缘影响参考区")
+        axes[-1].set(xlabel="相对触发时间（s）", xlim=(time_s[0], time_s[-1]))
+        color_label = "尺度归一化小波功率（对数色标）" if vmax > 0 else "尺度归一化小波功率"
+        fig.colorbar(meshes[0], ax=axes[1:], label=color_label)
+        fig.suptitle(f"{title}\n斜线区域：连续段的边缘影响参考区")
         _save(fig, output_path)
 
 
@@ -311,7 +318,7 @@ def plot_vibration_candidates(output_path, time_s, position_um, rms_um,
     position_um = np.asarray(position_um, dtype=float)
     rms_um = np.asarray(rms_um, dtype=float)
     valid = np.isfinite(position_um).all(axis=1)
-    reference = position_um[np.flatnonzero(valid)[0]]
+    reference = position_um[np.flatnonzero(valid)[0]] if valid.any() else np.zeros(2)
     centered = position_um - reference
     window_ms = rms_window_s * 1000
 
@@ -339,4 +346,30 @@ def plot_vibration_candidates(output_path, time_s, position_um, rms_um,
                     title=f"候选振动区间（RMS 窗口 {window_ms:g} ms）")
         axes[1].legend(frameon=False, loc="upper right")
         fig.suptitle("完整轨迹的振动候选段复核")
+        _save(fig, output_path)
+
+
+def plot_event_distributions(output_path, energy, onset_intervals_s, quiet_gaps_s):
+    """Plot distributions of cumulative squared displacement and event intervals."""
+    series = (
+        (energy, "RMS 平方积分（µm²·s）"),
+        (np.asarray(onset_intervals_s) * 1000, "相邻事件起点间隔（ms）"),
+        (np.asarray(quiet_gaps_s) * 1000, "上一段结束至本段开始（ms）"),
+    )
+    with plt.rc_context(_style()):
+        fig, axes = plt.subplots(1, 3, figsize=(12, 4), layout="constrained")
+        for index, (ax, (values, label)) in enumerate(zip(axes, series)):
+            values = np.asarray(values, dtype=float)
+            values = values[np.isfinite(values)]
+            if len(values):
+                bins = min(20, max(1, int(np.ceil(np.sqrt(len(values))))))
+                if index == 0 and 0 < values.min() < values.max():
+                    bins = np.geomspace(values.min(), values.max(), bins + 1)
+                    ax.set_xscale("log")
+                    label = "RMS 平方积分（µm²·s，对数轴）"
+                ax.hist(values, bins=bins, color="#486785", edgecolor="white")
+            else:
+                ax.text(.5, .5, "暂无数据", transform=ax.transAxes, ha="center", va="center")
+            ax.set(xlabel=label, ylabel="数量", title=f"{len(values)} 个样本")
+        fig.suptitle("候选振动强度与间隔分布")
         _save(fig, output_path)

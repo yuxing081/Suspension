@@ -181,7 +181,8 @@ def _write_frames_csv(path, rows, source_frames, time, centroid_px, area_px,
 def postprocess_measurements(measurement_dir, output_dir, event_label="快速移动",
                              event_frame=None, full_scale_slm=500., channel_width_mm=27.,
                              channel_height_mm=12., velocity_window_s=.002,
-                             vibration_window_s=.020):
+                             vibration_window_s=.020, wavelet_frequency_range_hz=None,
+                             wavelet_frequency_count=160):
     """Generate analysis products from exported measurements without raw inputs."""
     
     # 创建文件夹
@@ -315,6 +316,13 @@ def postprocess_measurements(measurement_dir, output_dir, event_label="快速移
         "event_flow_slm": event_flow,
         "mean_fast_speed_mm_s": mean_speed,
     }
+    if wavelet_frequency_range_hz is not None:
+        from particle_wavelet import export_trajectory_wavelet
+
+        video_frames = np.array([int(row["video_frame"]) for row in rows])
+        summary["wavelet"] = export_trajectory_wavelet(
+            output_dir, centroid_um, valid, video_frames, source_frames, time, fps,
+            wavelet_frequency_range_hz, wavelet_frequency_count)
     (output_dir / "analysis_summary.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
     print(f"{info['video_filename']} | 后处理 {len(source_frames)} 帧 | 结果 {output_dir}")
