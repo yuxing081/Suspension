@@ -4,17 +4,17 @@ from pathlib import Path
 
 from particle_ringdown import analyze_vibration_segments
 
-workspace = Path(__file__).resolve().parents[1]
-measurement_dir = workspace / "261110" / "1" / "measurements"
+workspace = Path(r"D:/revealer/Workspace/sus")
+measurement_dir = workspace / "261112" / "8" / "measurements"
 output_dir = measurement_dir.parent / "postprocess" / "ringdown"
 
 # (振动编号, 搜索起始帧, 搜索终止帧)：原视频 1-based 帧号，包含两端。
 # 每个范围围住一次待分析的响应。已有精确区间时可关闭自动选段。
 segments = [
-    (3, 3711, 3869),
+    (365, 129528, 130304),
 ]
 
-frequency_range_hz = (100., 2500.)  # 拟合搜索范围，须低于采集帧率的一半。
+frequency_range_hz = (100., 2400.)  # 拟合搜索范围，须低于采集帧率的一半。
 tau_range_s = (.0001, .1)          # 振幅衰减时间常数的搜索范围（秒）。
 auto_select_window = True
 min_cycles = 3.                   # 自动选段要求的最少振动周期数。

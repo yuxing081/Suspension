@@ -4,8 +4,8 @@ from pathlib import Path
 
 from particle_events import extract_vibration_events
 
-workspace = Path(__file__).resolve().parents[1]
-measurement_dir = workspace / "261110" / "1" / "measurements"
+workspace = Path(r"D:/revealer/Workspace/sus")
+measurement_dir = workspace / "261112" / "8" / "measurements"
 overlay_path = measurement_dir / "tracking_overlay.mp4"
 output_dir = measurement_dir.parent / "postprocess" / "vibration_candidates"
 

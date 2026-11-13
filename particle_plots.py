@@ -404,3 +404,81 @@ def plot_ringdown_selection(output_path, video_frames, position_um, fit_range,
         if handles:
             ax.legend(handles, labels, frameon=False)
         _save(fig, output_path)
+
+
+def plot_directionality(output_path, angle_deg, rms_um, summary):
+    """Save a polar plot of local detrended directional RMS."""
+    angle_deg = np.asarray(angle_deg, dtype=float).ravel()
+    rms_um = np.asarray(rms_um, dtype=float).ravel()
+    count = min(len(angle_deg), len(rms_um))
+    if count:
+        angle_deg, rms_um = angle_deg[:count], rms_um[:count]
+        finite = np.isfinite(angle_deg) & np.isfinite(rms_um)
+        angle_deg, rms_um = angle_deg[finite], np.maximum(rms_um[finite], 0.)
+    status = str(summary.get("status", "no_valid_windows"))
+    if len(angle_deg):
+        order = np.argsort(angle_deg)
+        angle_deg, rms_um = angle_deg[order], rms_um[order]
+
+    cardinal = {0: "+X（右）", 90: "+Y（下）", 180: "−X（左）", 270: "−Y（上）"}
+    ticks = np.arange(0, 360, 45)
+    tick_labels = [cardinal.get(int(value), f"{int(value)}°") for value in ticks]
+
+    with plt.rc_context(_style()):
+        fig, ax = plt.subplots(figsize=(7.5, 7), subplot_kw={"projection": "polar"},
+                               layout=None)
+        fig.subplots_adjust(left=.12, right=.88, bottom=.20, top=.82)
+        ax.set_theta_zero_location("E")
+        ax.set_theta_direction(-1)
+        ax.set_thetagrids(ticks, tick_labels)
+
+        maximum = float(np.max(rms_um)) if len(rms_um) else 0.
+        radius = maximum * 1.15 if maximum > 0 else 1.
+        ax.set_ylim(0, radius)
+        if len(angle_deg):
+            closed = len(angle_deg) > 1 and np.isclose(angle_deg[-1] - angle_deg[0], 360.)
+            theta = np.deg2rad(angle_deg if closed else np.r_[angle_deg, angle_deg[0] + 360.])
+            values = rms_um if closed else np.r_[rms_um, rms_um[0]]
+            ax.plot(theta, values, color="#486785", lw=1.5,
+                    label="方向 RMS")
+            ax.fill(theta, values, color="#486785", alpha=.18)
+
+        principal = summary.get("principal_axis_deg")
+        principal = float(principal) if principal is not None and np.isfinite(principal) else None
+        if principal is not None and status not in {"isotropic", "zero_power", "no_valid_windows"}:
+            principal %= 180.
+            theta = np.deg2rad([principal, principal])
+            ax.plot(theta, [0., radius * .94], "--", color="#ae3241", lw=1,
+                    alpha=.8, label="优势轴")
+            ax.plot(theta + np.pi, [0., radius * .94], "--", color="#ae3241", lw=1,
+                    alpha=.8)
+
+        window_ms = summary.get("window_seconds")
+        window_text = "窗口未知" if window_ms is None else f"窗口 {float(window_ms) * 1000:g} ms"
+        sample_range = summary.get("sample_time_range_s")
+        center_range = summary.get("window_center_time_range_s")
+        coverage = sample_range if sample_range is not None else center_range
+        if coverage is not None and len(coverage) >= 2:
+            coverage_text = f"覆盖 {float(coverage[0]):.3f}–{float(coverage[1]):.3f} s"
+        else:
+            coverage_text = "覆盖时间未知"
+        count_text = f"，{int(summary.get('window_count', 0))} 个窗口"
+        if status == "isotropic":
+            anisotropy = summary.get("anisotropy")
+            anisotropy_text = "" if anisotropy is None or not np.isfinite(anisotropy) else f"，A={float(anisotropy):.3g}"
+            direction_text = f"无明显优势轴{anisotropy_text}"
+        elif status in {"zero_power", "no_valid_windows"} or principal is None:
+            direction_text = "无法判定方向"
+        else:
+            anisotropy = summary.get("anisotropy")
+            anisotropy_text = "" if anisotropy is None or not np.isfinite(anisotropy) else f"，A={float(anisotropy):.3g}"
+            direction_text = f"优势轴 θ={principal:.1f}°（+180°等价）{anisotropy_text}"
+        fig.suptitle("颗粒振动方向性", y=.975)
+        fig.text(.5, .935, "局部去线性趋势方向 RMS（µm）", ha="center", va="top", fontsize=10)
+        fig.text(.5, .075, f"{window_text}；{coverage_text}{count_text}",
+                 ha="center", va="bottom", fontsize=9)
+        fig.text(.5, .035, direction_text, ha="center", va="bottom", fontsize=9)
+        if len(angle_deg):
+            ax.legend(frameon=False, loc="upper center", bbox_to_anchor=(.5, 1.12),
+                      ncol=2)
+        _save(fig, output_path)
