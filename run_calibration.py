@@ -5,9 +5,9 @@ from pathlib import Path
 from checkerboard_grid import calibrate_checkerboard
 
 
-workspace = Path(__file__).resolve().parents[1]
-experiment_dir = workspace / "261110"
-image_path = experiment_dir / "192.168.8.52" / "192.168.8.52_20261110_154431_477568.bmp"
+workspace = Path(r"D:/revealer/Workspace/sus")
+experiment_dir = workspace / "261112"
+image_path = experiment_dir / "192.168.8.52" / "192.168.8.52_20261112_212401_831455.bmp"
 square_size_mm = 0.5
 inner_corners = (4, 3)  # 内角点的列数、行数（不是方格数）
 output_dir = experiment_dir / "calibration"

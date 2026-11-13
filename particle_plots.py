@@ -373,3 +373,34 @@ def plot_event_distributions(output_path, energy, onset_intervals_s, quiet_gaps_
             ax.set(xlabel=label, ylabel="数量", title=f"{len(values)} 个样本")
         fig.suptitle("候选振动强度与间隔分布")
         _save(fig, output_path)
+
+
+def plot_ringdown_selection(output_path, video_frames, position_um, fit_range,
+                            title):
+    """Plot an approximate ringdown window and its selected fit interval."""
+    video_frames = np.asarray(video_frames, dtype=float)
+    position_um = np.asarray(position_um, dtype=float)
+
+    with plt.rc_context(_style()):
+        fig, ax = plt.subplots(figsize=(10, 4), layout="constrained")
+        for axis, label, color in ((0, "X", "#486785"),
+                                   (1, "Y", "#28786d")):
+            values = position_um[:, axis]
+            finite = np.isfinite(values)
+            if finite.any():
+                first = values[np.flatnonzero(finite)[0]]
+                centered = values - first
+                ax.plot(video_frames, np.where(finite, centered, np.nan),
+                        color=color, lw=.9, label=label)
+
+        if fit_range is not None:
+            start, end = fit_range
+            ax.axvspan(float(start), float(end), color="#ae3241", alpha=.14,
+                       lw=0, label=f"实际拟合帧 {int(start)}–{int(end)}")
+
+        ax.set(xlabel="原视频帧号", ylabel="相对首个有效点位移（µm）",
+               title=title)
+        handles, labels = ax.get_legend_handles_labels()
+        if handles:
+            ax.legend(handles, labels, frameon=False)
+        _save(fig, output_path)

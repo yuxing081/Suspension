@@ -1,9 +1,9 @@
 from pathlib import Path
 from particle_postprocess import postprocess_measurements
 
-workspace = Path(__file__).resolve().parents[1]
-experiment_dir = workspace / "261110"
-measurement_dir = experiment_dir / "1" / "measurements"
+workspace = Path(r"D:/revealer/Workspace/sus")
+experiment_dir = workspace / "261112"
+measurement_dir = experiment_dir / "8" / "measurements"
 output_dir = measurement_dir.parent / "postprocess" / "baseline"
 
 event_label = "快速移动"

@@ -1,14 +1,14 @@
 from pathlib import Path
 from particle_motion import analyze_video
 
-workspace = Path(__file__).resolve().parents[1]
-experiment_dir = workspace / "261110"
+workspace = Path(r"D:/revealer/Workspace/sus")
+experiment_dir = workspace / "261112"
 
 # 修改下面这几行即可切换一次分析的视频。
-video_path = experiment_dir / "1-1-45000.mp4"
-flow_path = experiment_dir / "1.csv"
+video_path = experiment_dir / "7-1-43750.mp4"
+flow_path = experiment_dir / "7.csv"
 calibration_path = experiment_dir / "calibration" / "calibration.json"
-log_path = experiment_dir / "oplog" / "revealer_2026-11-10.log"
+log_path = experiment_dir / "oplog" / "revealer_2026-11-12.log"
 output_dir = None  # 默认：视频旁的 序号/measurements；保留多次测量时可指定不同目录。
 
 # 视频内的帧序号，从 1 开始，包含起止两帧；None 表示从开头/处理到结尾。

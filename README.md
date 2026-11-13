@@ -7,12 +7,12 @@
 3. **按分析目的运行后处理** · 各入口顶部的 `measurement_dir` 应指向上一步实际生成的测量目录。
    - **位移、速度、频谱、流量和整段小波** · 运行 `postprocess_particles.py`，结果默认写入 `postprocess/baseline/`。
    - **从长视频筛选振动** · 运行 `extract_vibration_events.py`，在 `postprocess/vibration_candidates/` 查看带标记片段、候选清单及强度与间隔分布图。用 `segments.csv` 末列 `energy_rank` 查找累计位移波动较强的候选。
-   - **逐段衰减拟合** · 查看候选片段或手动选段，把 `(编号, 起始帧, 终止帧)` 填入 `fit_particle_vibrations.py` 的 `segments`。拟合区间通常从激励结束后开始，截止于下一次激励前。拟合参数、曲线、包络和残差默认写入 `postprocess/ringdown/`。
+   - **逐段衰减拟合** · 把围住一次响应的 `(编号, 搜索起始帧, 搜索终止帧)` 填入 `fit_particle_vibrations.py` 的 `segments`。默认自动挑选衰减尾段，在 `fit_windows.csv` 和各段的 `selection.png` 核对所选帧。已有精确区间时，将 `auto_select_window` 设为 `False`。
 
 
 选段、候选表和视频文件名使用原视频内的 `video_frame`，从 1 开始，包含起止帧。持续时间和频率按采集帧率计算。
 
-小波按连续有效跟踪区间分别计算和出图，保留原帧号和触发时间。拟合只要求所选帧连续有效，可以直接在同一个测量目录上运行。
+小波按连续有效跟踪区间分别计算和出图，保留原帧号和触发时间。拟合可直接读取同一测量目录，在搜索范围内挑选连续有效帧。
 
 ## 入口及其主要函数
 
@@ -22,7 +22,7 @@
 | [analyze_video.py](analyze_video.py) | [particle_motion.py](particle_motion.py) 中的 `analyze_video()` | `selected_frame_bounds()` 确定处理范围。`track_video()` 调用 `first_particle()`、`particle_background()`、`particle_measurement()` 初始化并逐帧测量。 |
 | [postprocess_particles.py](postprocess_particles.py) | [particle_postprocess.py](particle_postprocess.py) 中的 `postprocess_measurements()` | `motion_metrics()` 计算速度和位移 RMS，`departure_index()` 查找快速移动起点，`centroid_spectrum()` 计算频谱，`fit_ramp()` 拟合流量斜坡，`write_summary()` 导出 Excel 汇总，`export_trajectory_wavelet()` 输出小波数据和图。 |
 | [extract_vibration_events.py](extract_vibration_events.py) | [particle_events.py](particle_events.py) 中的 `extract_vibration_events()` | 复用 `motion_metrics()` 计算 RMS，再由 `find_vibration_intervals()` 按双阈值和持续时间筛选候选。 |
-| [fit_particle_vibrations.py](fit_particle_vibrations.py) | [particle_ringdown.py](particle_ringdown.py) 中的 `analyze_vibration_segments()` | `fit_ringdown()` 对各段 X、Y 分别拟合振动频率和衰减时间。 |
+| [fit_particle_vibrations.py](fit_particle_vibrations.py) | [particle_ringdown.py](particle_ringdown.py) 中的 `analyze_vibration_segments()` | `select_ringdown_window()` 筛选衰减尾段，`fit_ringdown()` 分别拟合 X、Y 的频率和衰减时间。 |
 
 ## 共用模块
 
